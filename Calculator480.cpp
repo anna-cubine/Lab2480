@@ -10,6 +10,8 @@
 
 using namespace std;
 
+//To run :  g++ Calculator480.cpp -o Calculator.exe
+
 /**
  * Enum for the type of token to simplify tokenization
  */
@@ -39,31 +41,6 @@ std::unordered_map<std::string, bool> isLeftAssociative = {
     {"^", false}
 };
 
-int main(){
-    std::string expression;
-    bool active = true;
-    while (active){
-        //Ask user for an equation to process
-        std::cout << "Enter your expression or type exit to end program: ";
-        std::getline(std::cin, expression);
-
-        //Since I can't change the entire string to lowercase at once in c++(at least to my knowledge), I first
-        //check if the user has e or E at the beginning of their expression, then I put everything to lowercase
-        //and check from there if the expression is "exit". If so, end the program.
-        if (expression[0] == 'e' || expression[0] == 'E'){
-            for (int i=0; i<expression.length(); i++)
-                tolower(expression[i]);
-            if (expression == "exit"){
-                std::cout << "Exiting...";
-                active = false;
-            }
-        }
-        //If the user has not typed exit, then we will go on with tokenizing the expression.
-        Tokenizer Tokenizer(expression);
-    }
-    return 0;
-}
-
 /**
  * Here is an entire class dedicated to tokenizing the expression given by the user. I had a lot of help from ChatGPT since I don't remember how to
  * tokenize in Java and I'm still very new to C++. I made sure to have an understanding of the code before using it however. 
@@ -86,9 +63,8 @@ public:
         while(pos < expr.length()){
             //If the char is just a space character, the skip the space, will only allow one space in between chars.
             //If user puts multiple spaces at once, there will be an error thrown in the else clause inside the while loop.
-            if (std::isspace(expr[pos])){
+            while (std::isspace(expr[pos])){
                 pos++;
-                continue;
             }
             //If char at position is a digit OR if it is a decimal, then also must not be the end of the expression AND the char
             //afterwards must be a digit
@@ -98,6 +74,20 @@ public:
             } else if (std::isalpha(expr[pos])){
                 tokens.push_back(parseFunctionOrVariable());
             } else if (isOperator(expr[pos])){
+                //This is to check if we're evaluating a negative rather than subtraction
+                if (expr[pos] == '-' && (pos == 0 || (tokens.back().type == TokenType::OPERATOR || (tokens.back().value == "(" || tokens.back().value == "{")))){
+                    size_t start = pos++;
+                    //Here, we're taking the number along with any possible decimals and putting it all together
+                    //in tokenized form.
+                    while (pos < expr.length() && (isdigit(expr[pos]) || expr[pos] == '.')){
+                        pos++;
+                    }
+                    tokens.push_back({TokenType::NUM, expr.substr(start, pos - start)});
+                }
+                //Have to account for space when taking the next operator
+                while (std::isspace(expr[pos])){
+                    pos++;
+                }
                 tokens.push_back(parseOperator(tokens));
             } else if (isBracket(expr[pos])){
                 tokens.push_back({TokenType::PARENTHESIS, std::string(1, expr[pos++])});
@@ -108,6 +98,7 @@ public:
                 throw std::runtime_error("Unexpected character in expression: " + std::string(1, expr[pos]));
             }
         }
+        return tokens;
     }
 
 /**
@@ -203,32 +194,45 @@ private:
 std::vector<Token> evaluateTokens(const std::vector<Token>& tokens){
     std::vector<Token> outputQueue;
     std::stack<Token> operatorStack;
-    
-    //Going through each token in equation
+
+    //Going through each token in equation. Must use constant so it remains the same
+    //and auto& so there are no copies which wouldn't be very efficient.
     for(const auto& token : tokens){
         if (token.type == TokenType::NUM){
-            outputQueue.push_back(token); //Numbers go to output
+            outputQueue.push_back(token); //Numbers go to output queue
         } else if (token.type == TokenType::FUNCTION){
-            operatorStack.push(token);
+            operatorStack.push(token); //functions go to operator stack
         } else if (token.type == TokenType::OPERATOR){
+            //If the operatorStack is not empty and the top has an aoperator
             while (!operatorStack.empty() && operatorStack.top().type == TokenType::OPERATOR){
+                //First, put the operator into a new variable
                 std::string topOp = operatorStack.top().value;
+                //if the operator is evaluated left to right and the precedence is less or equal to the last
+                //operator evaluated OR it's evaluated right to left and the precedence is less than the last operator
                 if ((isLeftAssociative[token.value] && precedence[token.value] <= precedence[topOp]) ||
                     (!isLeftAssociative[token.value] && precedence[token.value] < precedence[topOp])) {
+                    //Then we push the top of the operator stack onto the output queue and pop it from the op stack
                     outputQueue.push_back(operatorStack.top());
                     operatorStack.pop();
                 } else {
+                    //If it's neither, then just skip
                     break;
                 }
             }
+            //Push to stack
+            //We're not pushing this to the operator queue yet because we need to evaluate precedences before
+            //pushing them tho the output queue. We go from most precedence to least
             operatorStack.push(token);
         } else if (token.value == "(" || token.value == "{"){
             operatorStack.push(token); //Open parenthesis in stack
         } else if (token.value == ")" || token.value == "}"){
-            while (!operatorStack.empty() && operatorStack.top().value != "(" || operatorStack.top().value != "{"){
+            //Making sure that there is an open parentheses per close parentheses
+            while (!operatorStack.empty() && (operatorStack.top().value != "(" && operatorStack.top().value != "{")){
+                //Push open parenthesis to output queue and pop it from the stack
                 outputQueue.push_back(operatorStack.top());
                 operatorStack.pop();
             }
+            //If there are no open parentheses, throw an error
             if (operatorStack.empty()){
                 throw std::runtime_error("Mismatched parentheses!");
             }
@@ -240,8 +244,9 @@ std::vector<Token> evaluateTokens(const std::vector<Token>& tokens){
         }
     }
 
+    //In case there are some missing operators or parentheses
     while (!operatorStack.empty()){
-        if (operatorStack.top().value == "("){
+        if (operatorStack.top().value == "(" || operatorStack.top().value == "{"){
             throw std::runtime_error("Mismatched Parentheses!");
         }
         outputQueue.push_back(operatorStack.top());
@@ -249,4 +254,104 @@ std::vector<Token> evaluateTokens(const std::vector<Token>& tokens){
     }
 
     return outputQueue;
+}
+
+/**
+ * Postfix evaluation which I got help form chatGPT. This will completely evaluate the tokenized and postfixed expression
+ * and return a result. We will iterate through the tokens and evaluate per function or operator given
+ * @return result from expression given by user
+ */
+float postfixEval(const std::vector<Token>& tokens){
+    std::stack<float> evalStack;
+
+    for(const auto& token : tokens){
+        if (token.type == TokenType::NUM){
+            evalStack.push(std::stoi(token.value)); //Push number to an evaluation stack to work with the operators and functions
+        } else if (token.type == TokenType::OPERATOR){
+            //If there is simply just a number or something, alert the user
+            if (evalStack.size() < 2){
+                throw std::runtime_error("Not enough operands!");
+            }
+
+            //Push the eval numbers to a and b, making sure the first goes to b and second to a
+            float b = evalStack.top(); evalStack.pop();
+            float a = evalStack.top(); evalStack.pop();
+            float result = 0;
+
+            if (token.value == "+") result = a + b;
+            else if (token.value == "-") result = a - b;
+            else if (token.value == "*") result = a * b;
+            else if (token.value == "/") {
+                //Accounting for division by 0
+                if (b == 0) throw std::runtime_error("Division by 0");
+                result = a / b;
+            }
+            else if (token.value == "^") result = std::pow(a, b);
+
+            evalStack.push(result); //Result pushed to evaluation stack so it can be evaluated later
+        } else if (token.type == TokenType::FUNCTION){
+            //If there's a function but there's no number for it, throw error
+            if (evalStack.empty()) {
+                throw std::runtime_error("Function needs an argument!");
+            }
+
+            float arg = evalStack.top(); evalStack.pop();
+            float result = 0;
+
+            if (token.value == "sin") result = std::sin(arg);
+            else if (token.value == "cos") result = std::cos(arg);
+            else if (token.value == "tan") result = std::tan(arg);
+            else if (token.value == "cot") result = 1 / std::tan(arg);
+            else if (token.value == "ln") result = std::log(arg);
+            else if (token.value == "log") result = std::log10(arg);
+
+            evalStack.push(result);
+        }
+    }
+
+    if (evalStack.size() != 1)
+        throw std::runtime_error("Invalid expression!");
+    
+    //Return evaluated soluation!
+    return evalStack.top();
+}
+
+int main(){
+    std::string expression;
+    
+    while (true){
+        try {
+            //Ask user for an equation to process
+            std::cout << "Enter your expression or type exit to end program: ";
+            std::getline(std::cin, expression);
+
+            //Since I can't change the entire string to lowercase at once in c++(at least to my knowledge), I first
+            //check if the user has e or E at the beginning of their expression, then I put everything to lowercase
+            //and check from there if the expression is "exit". If so, end the program.
+            if (!expression.empty() && expression[0] == 'e' || expression[0] == 'E'){
+                for (auto& i : expression)
+                    i = tolower(i);
+                if (expression == "exit"){
+                    std::cout << "Exiting...\n";
+                    break;
+                }
+            }
+            //If the user has not typed exit, then we will go on with tokenizing the expression.
+            Tokenizer tokenizer(expression);
+            std::vector<Token> tokens = tokenizer.tokenize();
+
+            //Converting to reverse polish notation suing Shunting Yard algorithm
+            std::vector<Token> postfix = evaluateTokens(tokens);
+
+            //Evaluate the expression
+            float result = postfixEval(postfix);
+            
+            //Display result
+            std::cout << result << std::endl;
+        } catch (const std::runtime_error& e){
+            std::cerr << "Error: " << e.what() << "\nPlease enter a valid expression.\n";
+            continue;
+        }
+    }
+    return 0;
 }
