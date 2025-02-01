@@ -11,6 +11,7 @@
 using namespace std;
 
 //To run :  g++ Calculator480.cpp -o Calculator.exe
+//Complex expression : -5.78+-(4-2.23)+sin(0)*cos(1)/(1+tan(2*ln(-3+2*(1.23+99.111))))
 
 /**
  * Enum for the type of token to simplify tokenization
@@ -25,7 +26,6 @@ struct Token {
     TokenType type;
     string value;
 };
-
 /**
  * Unordered map containing an operator and the precedence of each
  */
@@ -34,7 +34,10 @@ std::unordered_map<std::string, int> precedence = {
     {"*", 2}, {"/", 2},
     {"^", 3}
 };
-
+/**
+ * Unordered map checking associativity, whether the operands and operator should be
+ * evaluated from left to right (true), or right to left (false)
+ */
 std::unordered_map<std::string, bool> isLeftAssociative = {
     {"+", true}, {"-", true},
     {"*", true}, {"/", true},
@@ -69,27 +72,36 @@ public:
             //If char at position is a digit OR if it is a decimal, then also must not be the end of the expression AND the char
             //afterwards must be a digit
             if(std::isdigit(expr[pos]) || (expr[pos] == '.' && pos + 1 < expr.length() && std::isdigit(expr[pos + 1]))){
+                //This accounts for a number being attatched to a parenthesis
+                //Will add a * for the number and parentheses expression
+                if (!tokens.empty()){
+                    Token lastToken = tokens.back();
+                    if (lastToken.value == ")")
+                        tokens.push_back({TokenType::OPERATOR, "*"});
+                }
                 //push_back inserts item into the token vector
                 tokens.push_back(parseNumber());
             } else if (std::isalpha(expr[pos])){
+                //Accounting for number before a function, act as * function
+                if (!tokens.empty()){
+                    Token lastToken = tokens.back();
+                    if(lastToken.type == TokenType::NUM)
+                        tokens.push_back({TokenType::OPERATOR, "*"});
+                }
                 tokens.push_back(parseFunctionOrVariable());
             } else if (isOperator(expr[pos])){
-                //This is to check if we're evaluating a negative rather than subtraction
-                if (expr[pos] == '-' && (pos == 0 || (tokens.back().type == TokenType::OPERATOR || (tokens.back().value == "(" || tokens.back().value == "{")))){
-                    size_t start = pos++;
-                    //Here, we're taking the number along with any possible decimals and putting it all together
-                    //in tokenized form.
-                    while (pos < expr.length() && (isdigit(expr[pos]) || expr[pos] == '.')){
-                        pos++;
-                    }
-                    tokens.push_back({TokenType::NUM, expr.substr(start, pos - start)});
-                }
-                //Have to account for space when taking the next operator
-                while (std::isspace(expr[pos])){
-                    pos++;
-                }
                 tokens.push_back(parseOperator(tokens));
             } else if (isBracket(expr[pos])){
+                //accounting for numbers before parenthesis or parenthesis before as well
+                if(expr[pos] == '(' || expr[pos] == '{'){
+                    if (!tokens.empty()){
+                        Token lastToken = tokens.back();
+                        if(lastToken.type == TokenType::NUM)
+                            tokens.push_back({TokenType::OPERATOR, "*"});
+                        if(lastToken.value == ")" || lastToken.value == "}")
+                            tokens.push_back({TokenType::OPERATOR, "*"});
+                    }
+                }
                 tokens.push_back({TokenType::PARENTHESIS, std::string(1, expr[pos++])});
             } else {
                 if (std::isspace(expr[pos])){
@@ -98,6 +110,7 @@ public:
                 throw std::runtime_error("Unexpected character in expression: " + std::string(1, expr[pos]));
             }
         }
+
         return tokens;
     }
 
@@ -152,6 +165,12 @@ private:
     Token parseOperator(const std::vector<Token>& tokens) {
         char op = expr[pos];
         if (op == '-' && (tokens.empty() || tokens.back().type == TokenType::OPERATOR || (tokens.back().value == "(" || tokens.back().value == "{"))){
+            //Accounting for negatives attatched to parentheses, this will change it to -1 so it's
+            //tokenized as a number that can be stoi'd
+            if (pos + 1 < expr.length() && (expr[pos + 1] == '(' || expr[pos + 1] == '{')){
+                pos++; //Past minus
+                return {TokenType::NUM, "-1"};
+            }
             return parseNegativeNumber();
         }
         pos++;
@@ -261,12 +280,12 @@ std::vector<Token> evaluateTokens(const std::vector<Token>& tokens){
  * and return a result. We will iterate through the tokens and evaluate per function or operator given
  * @return result from expression given by user
  */
-float postfixEval(const std::vector<Token>& tokens){
-    std::stack<float> evalStack;
+double postfixEval(const std::vector<Token>& tokens){
+    std::stack<double> evalStack;
 
     for(const auto& token : tokens){
         if (token.type == TokenType::NUM){
-            evalStack.push(std::stoi(token.value)); //Push number to an evaluation stack to work with the operators and functions
+            evalStack.push(std::stod(token.value)); //Push number to an evaluation stack to work with the operators and functions
         } else if (token.type == TokenType::OPERATOR){
             //If there is simply just a number or something, alert the user
             if (evalStack.size() < 2){
@@ -274,9 +293,9 @@ float postfixEval(const std::vector<Token>& tokens){
             }
 
             //Push the eval numbers to a and b, making sure the first goes to b and second to a
-            float b = evalStack.top(); evalStack.pop();
-            float a = evalStack.top(); evalStack.pop();
-            float result = 0;
+            double b = evalStack.top(); evalStack.pop();
+            double a = evalStack.top(); evalStack.pop();
+            double result = 0;
 
             if (token.value == "+") result = a + b;
             else if (token.value == "-") result = a - b;
@@ -295,20 +314,32 @@ float postfixEval(const std::vector<Token>& tokens){
                 throw std::runtime_error("Function needs an argument!");
             }
 
-            float arg = evalStack.top(); evalStack.pop();
-            float result = 0;
+            double arg = evalStack.top(); evalStack.pop();
+            double result = 0;
 
+            //Function evaluation accounting for undefined numbers given
             if (token.value == "sin") result = std::sin(arg);
             else if (token.value == "cos") result = std::cos(arg);
             else if (token.value == "tan") result = std::tan(arg);
-            else if (token.value == "cot") result = 1 / std::tan(arg);
-            else if (token.value == "ln") result = std::log(arg);
-            else if (token.value == "log") result = std::log10(arg);
+            else if (token.value == "cot"){
+                if (std::tan(arg) == 0) throw std::runtime_error("Cotangent is undefined with an argument of 0");
+                result = 1 / std::tan(arg);
+            }
+            else if (token.value == "ln"){
+                if (arg <= 0) throw std::runtime_error("ln cannot have an argument less than or equal to 0");
+                result = std::log(arg);
+            }
+            else if (token.value == "log"){
+                if (arg <= 0) throw std::runtime_error("log cannot have an argument less than or equal to 0");
+                result = std::log10(arg);
+            }
 
             evalStack.push(result);
         }
     }
 
+    //If evalStack has more than just the solution,
+    //the whole stack has not been evaluated.
     if (evalStack.size() != 1)
         throw std::runtime_error("Invalid expression!");
     
@@ -344,7 +375,7 @@ int main(){
             std::vector<Token> postfix = evaluateTokens(tokens);
 
             //Evaluate the expression
-            float result = postfixEval(postfix);
+            double result = postfixEval(postfix);
             
             //Display result
             std::cout << result << std::endl;
