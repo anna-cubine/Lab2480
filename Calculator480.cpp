@@ -2,10 +2,9 @@
 #include <string>
 #include <stack>
 #include <math.h>
-#include <cmath>
 #include <vector>
 #include <cctype>
-#include <unordered_set>
+
 #include <unordered_map>
 
 using namespace std;
